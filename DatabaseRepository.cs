@@ -329,17 +329,18 @@ public static class DatabaseRepository
                 command.Transaction = transaction;
                 command.CommandText = @"
                     UPDATE MachineWiseEnergyDetails_MVP 
-                    SET ServoEnergy = $servo, SpindleEnergy = $spindle, TotalEnergy = $total, UpdatedTS = $uts, SyncedStatus = $synced
+                    SET ServoEnergy = $servo, SpindleEnergy = $spindle, CO2 = $co2 , TotalEnergy = $total, UpdatedTS = $uts, SyncedStatus = $synced
                     WHERE IOTID = $iotid AND Category = $cat;
 
-                    INSERT INTO MachineWiseEnergyDetails_MVP (IOTID, Category, ServoEnergy, SpindleEnergy, TotalEnergy, UpdatedTS, SyncedStatus)
-                    SELECT $iotid, $cat, $servo, $spindle, $total, $uts, $synced
+                    INSERT INTO MachineWiseEnergyDetails_MVP (IOTID, Category, ServoEnergy, SpindleEnergy, CO2, TotalEnergy, UpdatedTS, SyncedStatus)
+                    SELECT $iotid, $cat, $servo, $spindle, $co2, $total, $uts, $synced
                     WHERE (SELECT Changes() = 0);";
 
                 var pIOTID = command.CreateParameter(); pIOTID.ParameterName = "$iotid"; command.Parameters.Add(pIOTID);
                 var pCat = command.CreateParameter(); pCat.ParameterName = "$cat"; command.Parameters.Add(pCat);
                 var pServo = command.CreateParameter(); pServo.ParameterName = "$servo"; command.Parameters.Add(pServo);
                 var pSpindle = command.CreateParameter(); pSpindle.ParameterName = "$spindle"; command.Parameters.Add(pSpindle);
+                var pCO2 = command.CreateParameter(); pCO2.ParameterName = "$co2"; command.Parameters.Add(pCO2);
                 var pTotal = command.CreateParameter(); pTotal.ParameterName = "$total"; command.Parameters.Add(pTotal);
                 var pUTS = command.CreateParameter(); pUTS.ParameterName = "$uts"; command.Parameters.Add(pUTS);
                 var pSynced = command.CreateParameter(); pSynced.ParameterName = "$synced"; command.Parameters.Add(pSynced);
@@ -349,6 +350,7 @@ public static class DatabaseRepository
                     pCat.Value = r.Category ?? (object)DBNull.Value;
                     pServo.Value = r.ServoEnergy;
                     pSpindle.Value = r.SpindleEnergy;
+                    pCO2.Value = 0;
                     pTotal.Value = r.TotalEnergy;
                     pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
                     pSynced.Value = 0;

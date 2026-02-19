@@ -518,6 +518,7 @@ public class SimulationEngine
             POT = CurrentPot,
             OT = CurrentOt,
             CT = CurrentCt,
+            OperatorID = _currentProgram.OperatorId.ToString(),
             UpdatedTS = FormatTime(_currentTime),
             SyncedStatus = 0
         });
