@@ -80,18 +80,23 @@ public class Worker : BackgroundService
             // Initialize global batch processor with configured batch size
             GlobalBatchProcessor.Initialize(batchSize);
 
-            // Load machines from database (Hardcoded in SQLite version)
+            // Seed machine info into MachineInformation_MVP (idempotent)
+            Logger.WriteDebugLog("Seeding machine information into MachineInformation_MVP...");
+            await DatabaseRepository.SeedMachines();
+
+            // Load machines from MachineInformation_MVP
             var machines = await DatabaseRepository.GetMachines();
 
             if (machines.Count == 0)
             {
-                Logger.WriteErrorLog("No machines found in database. Please populate master.machine_info table.");
+                Logger.WriteErrorLog("No machines found in MachineInformation_MVP. Aborting simulation.");
                 return;
             }
 
             // Limit to configured number of machines
             machines = machines.Take(numberOfMachines).ToList();
-            Logger.WriteDebugLog($"Loaded {machines.Count} machines (Hardcoded for SQLite)");
+            Logger.WriteDebugLog($"Starting simulation for {machines.Count} machine(s): {string.Join(", ", machines.Select(m => m.MachineID))}");
+
 
             // Create linked cancellation token
             var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);

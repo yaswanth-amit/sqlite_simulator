@@ -10,6 +10,47 @@ public static class DatabaseRepository
 {
     private static readonly Random Rand = new Random();
     #region Master Data Retrieval
+    public static async Task SeedMachines()
+    {
+        try
+        {
+            using var conn = await SqliteConnectionManager.GetConnectionAsync();
+            using var transaction = conn.BeginTransaction();
+            try
+            {
+                var command = conn.CreateCommand();
+                command.Transaction = transaction;
+
+                // INSERT OR REPLACE so every startup is idempotent
+                command.CommandText = @"
+                    INSERT OR REPLACE INTO MachineInformation_MVP
+                        (MachineID, FocasIPAddress, PortNo, InterfaceID, UpdatedTS)
+                    VALUES
+                        ('M_1_002', '192.168.10.102', '8193', 2, $ts);";
+
+                var pTS = command.CreateParameter();
+                pTS.ParameterName = "$ts";
+                pTS.Value = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                command.Parameters.Add(pTS);
+
+                await command.ExecuteNonQueryAsync();
+                await transaction.CommitAsync();
+
+                Logger.WriteDebugLog("SeedMachines: seeded 2 machine(s) into MachineInformation_MVP.");
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                Logger.WriteErrorLog($"SeedMachines transaction error: {ex.Message}");
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteErrorLog($"SeedMachines error: {ex.Message}");
+        }
+    }
+
     public static async Task<List<MachineInfo>> GetMachines()
     {
         var machines = new List<MachineInfo>();
@@ -26,11 +67,11 @@ public static class DatabaseRepository
             {
                 machines.Add(new MachineInfo
                 {
-                    IotId           = reader.GetInt32(reader.GetOrdinal("InterfaceID")),
-                    MachineID       = reader.GetString(reader.GetOrdinal("MachineID")),
-                    FocasIPAddress  = reader.GetString(reader.GetOrdinal("FocasIPAddress")),
-                    PortNo          = reader.GetString(reader.GetOrdinal("PortNo")),
-                    DownThreshold   = 300 // default; not stored in MachineInformation_MVP
+                    IotId          = reader.GetInt32(reader.GetOrdinal("InterfaceID")),
+                    MachineID      = reader.GetString(reader.GetOrdinal("MachineID")),
+                    FocasIPAddress = reader.GetString(reader.GetOrdinal("FocasIPAddress")),
+                    PortNo         = reader.GetString(reader.GetOrdinal("PortNo")),
+                    DownThreshold  = 300 // default; not stored in MachineInformation_MVP
                 });
             }
 
@@ -45,6 +86,7 @@ public static class DatabaseRepository
         }
         return machines;
     }
+
     public static List<ShiftDetails> GetHardcodedShifts()
     {
         return new List<ShiftDetails>
