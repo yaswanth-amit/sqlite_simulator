@@ -12,22 +12,38 @@ public static class DatabaseRepository
     #region Master Data Retrieval
     public static async Task<List<MachineInfo>> GetMachines()
     {
-        // Hardcoded machines for MVP
-        var machines = new List<MachineInfo>
+        var machines = new List<MachineInfo>();
+        try
         {
-            new MachineInfo
+            using var conn = await SqliteConnectionManager.GetConnectionAsync();
+            var command = conn.CreateCommand();
+            command.CommandText = @"
+                SELECT MachineID, FocasIPAddress, PortNo, InterfaceID
+                FROM MachineInformation_MVP";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                IotId = 1,
-                DownThreshold = 300 // default or hardcoded
-            },
-            new MachineInfo
-            {
-                IotId = 2,
-                DownThreshold = 300
+                machines.Add(new MachineInfo
+                {
+                    IotId           = reader.GetInt32(reader.GetOrdinal("InterfaceID")),
+                    MachineID       = reader.GetString(reader.GetOrdinal("MachineID")),
+                    FocasIPAddress  = reader.GetString(reader.GetOrdinal("FocasIPAddress")),
+                    PortNo          = reader.GetString(reader.GetOrdinal("PortNo")),
+                    DownThreshold   = 300 // default; not stored in MachineInformation_MVP
+                });
             }
-        };
-        Logger.WriteDebugLog($"Loaded {machines.Count} machines from hardcoded list (MVP)");
-        return await Task.FromResult(machines);
+
+            if (machines.Count == 0)
+                Logger.WriteErrorLog("GetMachines: MachineInformation_MVP returned no rows.");
+            else
+                Logger.WriteDebugLog($"Loaded {machines.Count} machine(s) from MachineInformation_MVP.");
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteErrorLog($"GetMachines error: {ex.Message}");
+        }
+        return machines;
     }
     public static List<ShiftDetails> GetHardcodedShifts()
     {

@@ -11,8 +11,11 @@ public class ServiceStop
 }
 public class MachineInfo
 {
-    public int IotId { get; set; }
-    public int DownThreshold { get; set; } = 300; // seconds
+    public int IotId { get; set; }           // mapped from InterfaceID
+    public string MachineID { get; set; } = string.Empty;
+    public string FocasIPAddress { get; set; } = string.Empty;
+    public string PortNo { get; set; } = string.Empty;
+    public int DownThreshold { get; set; } = 300; // seconds (default, not in table)
 }
 public class ShiftDetails
 {
