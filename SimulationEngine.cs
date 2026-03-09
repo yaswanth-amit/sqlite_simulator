@@ -71,7 +71,7 @@ public class SimulationEngine
     private int CurrentCt => (int)Math.Round(
         _shiftCt + (_ctRunning ? (_currentTime - _shiftCutEpoch).TotalSeconds : 0));
 
-    private string FormatTime(DateTime dt) => TimeZoneInfo.ConvertTimeFromUtc(dt, IndiaTimeZone).ToString("yyyy-MM-dd HH:mm:ss");
+    private string FormatTime(DateTime dt) => dt.ToString("yyyy-MM-dd HH:mm:ss"); // UTC
 
     // ──────────────────────────────────────────────────────────────────────────
     public SimulationEngine(MachineInfo machineInfo, DateTime startTime,

@@ -47,7 +47,7 @@ public class MvpMachineStatus
     public string Status { get; set; } = string.Empty;   // Running | Idle | Stopped
     public string OperatorID { get; set; } = string.Empty;
     public int Target { get; set; }
-    public string UpdatedTS { get; set; } = string.Empty; // IST text
+    public string UpdatedTS { get; set; } = string.Empty; // UTC text
     public int SyncedStatus { get; set; } = 0;
 }
 // 2. MachineWiseAlarmDetails_MVP  ←→  bronze.raw_machine_alarms
@@ -56,7 +56,7 @@ public class MvpMachineAlarm
     public int IOTID { get; set; }
     public int AlarmNo { get; set; }
     public string AlarmDesc { get; set; } = string.Empty;
-    public string AlarmTS { get; set; } = string.Empty;   // IST text (= cnctimestamp)
+    public string AlarmTS { get; set; } = string.Empty;   // UTC text (= cnctimestamp)
     public string UpdatedTS { get; set; } = string.Empty;
     public int SyncedStatus { get; set; } = 0;
 }
