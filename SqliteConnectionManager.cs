@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using Polly;
 using Polly.Retry;
 using System;
@@ -50,6 +50,13 @@ public static class SqliteConnectionManager
             {
                 throw new InvalidOperationException("Failed to open database connection.");
             }
+
+            using (var pragmaCmd = connection.CreateCommand())
+            {
+                pragmaCmd.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 10000;";
+                await pragmaCmd.ExecuteNonQueryAsync();
+            }
+
             return connection;
         });
     }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -51,8 +51,7 @@ public static class Logger
                 string threadName = Thread.CurrentThread.Name ?? "Unknown";
 
                 DateTime utcNow = DateTime.UtcNow;
-                TimeZoneInfo indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
-                DateTime indiaTime = TimeZoneInfo.ConvertTimeFromUtc(utcNow, indiaTimeZone);
+                DateTime indiaTime = TimeZoneInfo.ConvertTimeFromUtc(utcNow, TimeZoneHelper.IndiaTimeZone);
 
                 string fileName = $"Log_{indiaTime:yyyyMMdd}.txt";
                 string filePath = Path.Combine(_logPath, fileName);

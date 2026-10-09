@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -8,6 +8,22 @@ namespace sqlite_simulator;
 public class ServiceStop
 {
     public static volatile bool StopService = false;
+}
+
+public static class TimeZoneHelper
+{
+    public static TimeZoneInfo IndiaTimeZone { get; } = ResolveIndiaTimeZone();
+
+    private static TimeZoneInfo ResolveIndiaTimeZone()
+    {
+        if (TimeZoneInfo.TryFindSystemTimeZoneById("India Standard Time", out var tz))
+            return tz;
+        if (TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Kolkata", out tz))
+            return tz;
+        if (TimeZoneInfo.TryFindSystemTimeZoneById("Asia/Calcutta", out tz))
+            return tz;
+        return TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromMinutes(330), "India Standard Time", "India Standard Time");
+    }
 }
 public class MachineInfo
 {
@@ -128,3 +144,26 @@ public class MvpMachineProgramProduction
     public string UpdatedTS { get; set; } = string.Empty;
     public int SyncedStatus { get; set; } = 0;
 }
+
+public class ProcessParameterDef
+{
+    public int Id { get; set; }
+    public string ParameterName { get; set; } = string.Empty;
+    public string DisplayText { get; set; } = string.Empty;
+    public string Unit { get; set; } = string.Empty;
+    public decimal LowerValue { get; set; }
+    public decimal HigherValue { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string? Axes { get; set; }
+}
+
+// 8. MachineWiseParameterDetails_MVP  ←→  bronze.raw_machine_parameter_telemetry
+public class MvpMachineParameter
+{
+    public int IOTID { get; set; }
+    public string ParameterID { get; set; } = string.Empty;
+    public string ParameterValue { get; set; } = string.Empty;
+    public string UpdatedTS { get; set; } = string.Empty;
+    public int SyncedStatus { get; set; } = 0;
+}
+

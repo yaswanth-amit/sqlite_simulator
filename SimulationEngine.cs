@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -13,9 +13,12 @@ public class SimulationEngine
     private readonly List<ProgramDetails> _programs;
     private readonly List<DownCodeInfo> _downCodes;
     private readonly List<AlarmInfo> _alarms;
+    private readonly List<ProcessParameterDef> _paramDefs;
+    private readonly Dictionary<string, decimal> _currentParamValues = new Dictionary<string, decimal>();
     private readonly Random _random = new Random();
     private readonly int _downtimeThresholdMinutes;
-    private static readonly TimeZoneInfo IndiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+    private readonly int _frequencyMs;
+    private static readonly TimeZoneInfo IndiaTimeZone = TimeZoneHelper.IndiaTimeZone;
     private bool _isHistoricalMode;  // True = fast backfill, False = real-time simulation
 
     private DateTime _currentTime;
@@ -71,21 +74,34 @@ public class SimulationEngine
     private int CurrentCt => (int)Math.Round(
         _shiftCt + (_ctRunning ? (_currentTime - _shiftCutEpoch).TotalSeconds : 0));
 
-    private string FormatTime(DateTime dt) => dt.ToString("yyyy-MM-dd HH:mm:ss"); // UTC
+    private string FormatTime(DateTime dt)
+    {
+        DateTime utc = dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+        DateTime ist = TimeZoneInfo.ConvertTimeFromUtc(utc, IndiaTimeZone);
+        return ist.ToString("yyyy-MM-dd HH:mm:ss");
+    }
 
     // ──────────────────────────────────────────────────────────────────────────
     public SimulationEngine(MachineInfo machineInfo, DateTime startTime,
-                            int downtimeThresholdMinutes, bool isHistoricalMode = false)
+                            int downtimeThresholdMinutes, bool isHistoricalMode = false,
+                            int frequencyMs = 1000)
     {
         _machineInfo = machineInfo;
         _currentTime = startTime;
         _downtimeThresholdMinutes = downtimeThresholdMinutes;
         _isHistoricalMode = isHistoricalMode;
+        _frequencyMs = frequencyMs > 0 ? frequencyMs : 1000;
 
         _shifts = DatabaseRepository.GetHardcodedShifts();
         _programs = DatabaseRepository.GetHardcodedPrograms();
         _downCodes = DatabaseRepository.GetHardcodedDownCodes();
         _alarms = DatabaseRepository.GetHardcodedAlarms();
+        _paramDefs = DatabaseRepository.GetHardcodedProcessParameters();
+
+        foreach (var p in _paramDefs)
+        {
+            _currentParamValues[p.ParameterName] = p.LowerValue;
+        }
 
         _currentProgram = _programs.First();
 
@@ -97,7 +113,7 @@ public class SimulationEngine
 
         string mode = _isHistoricalMode ? "HISTORICAL" : "LIVE";
         Logger.WriteDebugLog(
-            $"SimulationEngine initialised for Machine {_machineInfo.IotId} in {mode} mode");
+            $"SimulationEngine initialised for Machine {_machineInfo.IotId} in {mode} mode (Tick: {_frequencyMs}ms, 24 Process Parameters active)");
     }
 
     private void InitialiseShiftCounters()
@@ -255,14 +271,11 @@ public class SimulationEngine
     {
         try
         {
-            int seed = ComputeSeed(_currentProgram.StdCycleTime);
-            int machiningTime = PickRandom(_currentProgram.StdCycleTime - seed,
-                                             _currentProgram.StdCycleTime + seed);
-            int initialSpindleDelay = PickRandom(0, 3);
-            int spindleDelay = PickRandom(initialSpindleDelay, 5);
-            seed = ComputeSeed(_currentProgram.StdLoadUnload);
-            int loadUnloadTime = PickRandom(_currentProgram.StdLoadUnload - seed,
-                                             _currentProgram.StdLoadUnload);
+            int spindleDelay = 1;       // 1. Spindle Spin-Up: 1s (Running)
+            int machiningTime = 6;      // 2. Machining / Cutting: 6s (Cutting)
+            int loadUnloadTime = 2;     // 4. Load / Unload: 2s (Idle)
+            // 3. Spindle Spin-Down: 1s (Running -> Idle)
+            // Total = 1 + 6 + 1 + 2 = 10 seconds total cycle time
 
             ShiftDetails cycleStartShift = _currentShift;
 
@@ -277,7 +290,7 @@ public class SimulationEngine
 
             InsertCurrentStatus();
 
-            await SimulateDelay(spindleDelay);
+            await AdvanceTime(spindleDelay);
             _isCutting = true;
 
             if (!_ctRunning)
@@ -293,7 +306,7 @@ public class SimulationEngine
                 int machiningTimeFactor = PickRandom(1, 3);
                 int machiningBeforeAlarm = Convert.ToInt32(machiningTime / machiningTimeFactor);
 
-                await SimulateDelay(machiningBeforeAlarm);
+                await AdvanceTime(machiningBeforeAlarm);
 
                 if (_ctRunning)
                 {
@@ -332,11 +345,11 @@ public class SimulationEngine
 
                 InsertCurrentStatus();
 
-                await SimulateDelay(machiningTime - machiningBeforeAlarm);
+                await AdvanceTime(machiningTime - machiningBeforeAlarm);
             }
             else
             {
-                await SimulateDelay(machiningTime);
+                await AdvanceTime(machiningTime);
             }
 
             if (_ctRunning)
@@ -346,7 +359,7 @@ public class SimulationEngine
             }
             _isCutting = false;
 
-            await SimulateDelay(spindleDelay);
+            await AdvanceTime(spindleDelay);
             _cycleEnd = _currentTime;
 
             if (_otRunning)
@@ -397,7 +410,7 @@ public class SimulationEngine
                 InsertProgramProduction();
             }
 
-            await SimulateDelay(loadUnloadTime);
+            await AdvanceTime(loadUnloadTime);
 
             if (!_potRunning)
             {
@@ -433,7 +446,7 @@ public class SimulationEngine
                 }
             }
 
-            await SimulateDelay(downtimeSeconds);
+            await AdvanceTime(downtimeSeconds);
 
             DateTime downEnd = _currentTime;
 
@@ -629,12 +642,99 @@ public class SimulationEngine
         });
     }
 
-    private async Task SimulateDelay(int seconds, bool isInLiveMode = false)
+    private async Task AdvanceTime(int totalSeconds)
     {
-        if (!_isHistoricalMode || isInLiveMode)
-            await Task.Delay(seconds * 1000);
+        int stepSeconds = 1;
+        int remaining = totalSeconds;
+        while (remaining > 0)
+        {
+            int step = Math.Min(remaining, stepSeconds);
+            remaining -= step;
 
-        _currentTime = _currentTime.AddSeconds(seconds);
+            if (!_isHistoricalMode)
+            {
+                // Live mode: tick at the configured frequency (e.g. 1000ms = 1s, or 100ms)
+                await Task.Delay(_frequencyMs);
+                _currentTime = DateTime.UtcNow;
+            }
+            else
+            {
+                // Historical fast backfill mode
+                _currentTime = _currentTime.AddSeconds(step);
+            }
+
+            // High-frequency continuous stream: emit parameters, energy, status, focas & program production on every step
+            UpdateParameters();
+            EmitParameterTelemetry();
+            SimulateEnergyConsumption();
+            InsertCurrentStatus();
+            InsertFocasData();
+            InsertProgramProduction();
+        }
+    }
+
+    private void UpdateParameters()
+    {
+        foreach (var def in _paramDefs)
+        {
+            decimal target = def.LowerValue;
+            decimal changeRate = (def.HigherValue - def.LowerValue) * 0.05m; // 5% responsive fluctuation per step
+
+            // State-based parameter target values
+            if (def.ParameterName.Contains("Load"))
+            {
+                if (_isCutting) target = def.HigherValue * (decimal)(0.70 + _random.NextDouble() * 0.20); // 70-90%
+                else if (_isRunning) target = def.HigherValue * (decimal)(0.10 + _random.NextDouble() * 0.20); // 10-30%
+                else target = def.LowerValue + (def.HigherValue * 0.02m); // Idle load 2%
+            }
+            else if (def.ParameterName.Contains("Speed"))
+            {
+                if (_isCutting || _isRunning) target = def.HigherValue * (decimal)(0.85 + _random.NextDouble() * 0.10); // 85-95%
+                else target = def.LowerValue;
+            }
+            else if (def.ParameterName.Contains("Temp"))
+            {
+                string baseName = def.ParameterName.Replace("Temp", "").Replace("Temperature", "").Split('-')[0];
+                string loadParam = _paramDefs.FirstOrDefault(p => p.ParameterName.Contains(baseName) && p.ParameterName.Contains("Load"))?.ParameterName ?? "";
+
+                decimal load = !string.IsNullOrEmpty(loadParam) && _currentParamValues.ContainsKey(loadParam) ? _currentParamValues[loadParam] : 0;
+
+                // Heating/cooling thermodynamic curves
+                if (load > 50) target = _currentParamValues[def.ParameterName] + 0.8m;
+                else target = _currentParamValues[def.ParameterName] - 0.4m;
+            }
+
+            decimal current = _currentParamValues.ContainsKey(def.ParameterName) ? _currentParamValues[def.ParameterName] : def.LowerValue;
+
+            if (current < target) current += changeRate;
+            else if (current > target) current -= changeRate;
+
+            // Micro-noise jitter
+            current += (decimal)(_random.NextDouble() - 0.5) * (changeRate * 0.2m);
+
+            // Clamp to master definition bounds
+            if (current < def.LowerValue) current = def.LowerValue;
+            if (current > def.HigherValue) current = def.HigherValue;
+
+            _currentParamValues[def.ParameterName] = Math.Round(current, 2);
+        }
+    }
+
+    private void EmitParameterTelemetry()
+    {
+        string ts = FormatTime(_currentTime);
+        foreach (var def in _paramDefs)
+        {
+            decimal val = _currentParamValues.TryGetValue(def.ParameterName, out var v) ? v : def.LowerValue;
+            GlobalBatchProcessor.Instance.EnqueueParameter(new MvpMachineParameter
+            {
+                IOTID = _machineInfo.IotId,
+                ParameterID = def.ParameterName,
+                ParameterValue = val.ToString("0.##"),
+                UpdatedTS = ts,
+                SyncedStatus = 0
+            });
+        }
     }
 
     private ShiftDetails DetermineCurrentShift(DateTime time)

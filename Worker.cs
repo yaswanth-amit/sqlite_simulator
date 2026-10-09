@@ -65,24 +65,37 @@ public class Worker : BackgroundService
             Logger.WriteDebugLog($"System timezone: {TimeZoneInfo.Local.DisplayName}");
             Logger.WriteDebugLog($"Parsing StartDate string: '{startDateString}'");
 
-            // Parse as IST/India Time, but convert to UTC immediately for internal logic
-            TimeZoneInfo indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
-            DateTime startDate = TimeZoneInfo.ConvertTimeToUtc(DateTime.Parse(startDateString), indiaTimeZone);
             int numberOfMachines = _configuration.GetSection("SimulationSettings").GetValue<int>("NumberOfMachines", 2);
             int downtimeThresholdMinutes = _configuration.GetSection("SimulationSettings").GetValue<int>("DowntimeThresholdMinutes", 10);
             int batchSize = _configuration.GetSection("SimulationSettings").GetValue<int>("BatchSize", 1000);
+            int frequencyMs = _configuration.GetSection("SimulationSettings").GetValue<int>("FrequencyMs", 1000);
+            bool forceLiveMode = _configuration.GetSection("SimulationSettings").GetValue<bool>("IsLiveMode", true);
+
+            DateTime now = DateTime.UtcNow;
+            DateTime startDate;
+
+            TimeZoneInfo indiaTimeZone = TimeZoneHelper.IndiaTimeZone;
+            if (forceLiveMode)
+            {
+                startDate = now;
+            }
+            else
+            {
+                startDate = TimeZoneInfo.ConvertTimeToUtc(DateTime.Parse(startDateString), indiaTimeZone);
+            }
 
             Logger.WriteDebugLog($"Parsed start date (UTC): {startDate:yyyy-MM-dd HH:mm:ss}");
             Logger.WriteDebugLog($"Number of machines to simulate: {numberOfMachines}");
             Logger.WriteDebugLog($"Downtime threshold: {downtimeThresholdMinutes} minutes");
             Logger.WriteDebugLog($"Batch size: {batchSize} records");
+            Logger.WriteDebugLog($"Generation frequency: {frequencyMs} ms");
 
             // Initialize global batch processor with configured batch size
             GlobalBatchProcessor.Initialize(batchSize);
 
             // Seed machine info into MachineInformation_MVP (idempotent)
-            Logger.WriteDebugLog("Seeding machine information into MachineInformation_MVP...");
-            await DatabaseRepository.SeedMachines();
+            Logger.WriteDebugLog($"Seeding {numberOfMachines} machine(s) into MachineInformation_MVP...");
+            await DatabaseRepository.SeedMachines(numberOfMachines);
 
             // Load machines from MachineInformation_MVP
             var machines = await DatabaseRepository.GetMachines();
@@ -102,24 +115,24 @@ public class Worker : BackgroundService
             var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _cts.Token);
 
             // Determine if we need historical mode (using UTC)
-            DateTime now = DateTime.UtcNow;
-            bool isHistoricalMode = startDate < now;
+            bool isHistoricalMode = !forceLiveMode && startDate < now;
             DateTime? liveModeSwitchTime = isHistoricalMode ? now : null;
 
+            TimeZoneInfo tz = TimeZoneHelper.IndiaTimeZone;
             if (isHistoricalMode)
             {
-                Logger.WriteDebugLog($"Starting in HISTORICAL mode: {TimeZoneInfo.ConvertTimeFromUtc(startDate, indiaTimeZone):yyyy-MM-dd HH:mm:ss} ? {TimeZoneInfo.ConvertTimeFromUtc(now, indiaTimeZone):yyyy-MM-dd HH:mm:ss}");
-                Logger.WriteDebugLog($"Will switch to LIVE mode at: {TimeZoneInfo.ConvertTimeFromUtc(now, indiaTimeZone):yyyy-MM-dd HH:mm:ss}");
+                Logger.WriteDebugLog($"Starting in HISTORICAL mode: {TimeZoneInfo.ConvertTimeFromUtc(startDate, tz):yyyy-MM-dd HH:mm:ss} → {TimeZoneInfo.ConvertTimeFromUtc(now, tz):yyyy-MM-dd HH:mm:ss}");
+                Logger.WriteDebugLog($"Will switch to LIVE mode at: {TimeZoneInfo.ConvertTimeFromUtc(now, tz):yyyy-MM-dd HH:mm:ss}");
             }
             else
             {
-                Logger.WriteDebugLog($"Starting in LIVE mode from: {TimeZoneInfo.ConvertTimeFromUtc(startDate, indiaTimeZone):yyyy-MM-dd HH:mm:ss}");
+                Logger.WriteDebugLog($"Starting in LIVE mode from: {TimeZoneInfo.ConvertTimeFromUtc(startDate, tz):yyyy-MM-dd HH:mm:ss} (Tick: {frequencyMs}ms)");
             }
 
             // Start simulation for each machine (using global queue)
             foreach (var machine in machines)
             {
-                var engine = new SimulationEngine(machine, startDate, downtimeThresholdMinutes, isHistoricalMode);
+                var engine = new SimulationEngine(machine, startDate, downtimeThresholdMinutes, isHistoricalMode, frequencyMs);
                 var task = Task.Run(() => engine.StartSimulation(linkedCts.Token, liveModeSwitchTime), linkedCts.Token);
                 _simulationTasks.Add(task);
             }

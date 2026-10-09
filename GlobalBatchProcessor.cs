@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,6 +28,7 @@ public class GlobalBatchProcessor
     private readonly ConcurrentQueue<MvpMachineFocas> _focasQueue = new ConcurrentQueue<MvpMachineFocas>();
     private readonly ConcurrentQueue<MvpMachineProgramProduction> _programProductionQueue = new ConcurrentQueue<MvpMachineProgramProduction>();
     private readonly ConcurrentQueue<MvpMachineAlarm> _alarmQueue = new ConcurrentQueue<MvpMachineAlarm>();
+    private readonly ConcurrentQueue<MvpMachineParameter> _parameterQueue = new ConcurrentQueue<MvpMachineParameter>();
 
     public static GlobalBatchProcessor Instance
     {
@@ -59,8 +60,8 @@ public class GlobalBatchProcessor
     {
         _batchSize = batchSize;
 
-        // Auto-flush every 10 seconds as backup
-        _flushTimer = new Timer(async _ => await FlushAllQueues(), null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        // Auto-flush every 2 seconds as backup
+        _flushTimer = new Timer(async _ => await FlushAllQueues(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
 
         Logger.WriteDebugLog($"GlobalBatchProcessor initialized with batch size: {_batchSize}");
     }
@@ -122,6 +123,14 @@ public class GlobalBatchProcessor
             _ = Task.Run(() => FlushAlarmQueue());
         }
     }
+    public void EnqueueParameter(MvpMachineParameter record)
+    {
+        _parameterQueue.Enqueue(record);
+        if (_parameterQueue.Count >= _batchSize)
+        {
+            _ = Task.Run(() => FlushParameterQueue());
+        }
+    }
     #endregion
 
     #region Flush Methods
@@ -152,6 +161,10 @@ public class GlobalBatchProcessor
     private async Task FlushAlarmQueue()
     {
         await FlushQueue(_alarmQueue, DatabaseRepository.BatchInsertMvpMachineAlarm, "Alarm");
+    }
+    private async Task FlushParameterQueue()
+    {
+        await FlushQueue(_parameterQueue, DatabaseRepository.BatchInsertMvpMachineParameter, "Parameter");
     }
 
     private async Task FlushQueue<T>(ConcurrentQueue<T> queue, Func<List<T>, Task> batchInsertMethod, string queueName)
@@ -194,7 +207,8 @@ public class GlobalBatchProcessor
             FlushEnergyQueue(),
             FlushFocasQueue(),
             FlushProgramProductionQueue(),
-            FlushAlarmQueue()
+            FlushAlarmQueue(),
+            FlushParameterQueue()
         );
 
         Logger.WriteDebugLog("All queues flushed");
@@ -213,6 +227,7 @@ public class GlobalBatchProcessor
         FlushQueueSync(_focasQueue, DatabaseRepository.BatchInsertMvpMachineFocas, "FOCAS");
         FlushQueueSync(_programProductionQueue, DatabaseRepository.BatchInsertMvpMachineProgramProduction, "ProgramProduction");
         FlushQueueSync(_alarmQueue, DatabaseRepository.BatchInsertMvpMachineAlarm, "Alarm");
+        FlushQueueSync(_parameterQueue, DatabaseRepository.BatchInsertMvpMachineParameter, "Parameter");
 
         Logger.WriteDebugLog("All queues flushed synchronously");
     }

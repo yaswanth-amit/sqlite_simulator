@@ -1,4 +1,4 @@
-﻿using Microsoft.Data.Sqlite;
+using Microsoft.Data.Sqlite;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +10,7 @@ public static class DatabaseRepository
 {
     private static readonly Random Rand = new Random();
     #region Master Data Retrieval
-    public static async Task SeedMachines()
+    public static async Task SeedMachines(int numberOfMachines = 2)
     {
         try
         {
@@ -21,22 +21,32 @@ public static class DatabaseRepository
                 var command = conn.CreateCommand();
                 command.Transaction = transaction;
 
-                // INSERT OR REPLACE so every startup is idempotent
                 command.CommandText = @"
                     INSERT OR REPLACE INTO MachineInformation_MVP
                         (MachineID, FocasIPAddress, PortNo, InterfaceID, UpdatedTS)
                     VALUES
-                        ('M_1_002', '192.168.10.102', '8193', 2, $ts);";
+                        ($mid, $ip, $port, $iid, $ts);";
 
-                var pTS = command.CreateParameter();
-                pTS.ParameterName = "$ts";
-                pTS.Value = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                command.Parameters.Add(pTS);
+                var pMid = command.CreateParameter(); pMid.ParameterName = "$mid"; command.Parameters.Add(pMid);
+                var pIp = command.CreateParameter(); pIp.ParameterName = "$ip"; command.Parameters.Add(pIp);
+                var pPort = command.CreateParameter(); pPort.ParameterName = "$port"; command.Parameters.Add(pPort);
+                var pIid = command.CreateParameter(); pIid.ParameterName = "$iid"; command.Parameters.Add(pIid);
+                var pTS = command.CreateParameter(); pTS.ParameterName = "$ts"; command.Parameters.Add(pTS);
 
-                await command.ExecuteNonQueryAsync();
+                string ts = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneHelper.IndiaTimeZone).ToString("yyyy-MM-dd HH:mm:ss");
+
+                for (int i = 1; i <= numberOfMachines; i++)
+                {
+                    pMid.Value = $"M_1_{i:D3}";
+                    pIp.Value = $"192.168.10.{100 + i}";
+                    pPort.Value = "8193";
+                    pIid.Value = i;
+                    pTS.Value = ts;
+                    await command.ExecuteNonQueryAsync();
+                }
+
                 await transaction.CommitAsync();
-
-                Logger.WriteDebugLog("SeedMachines: seeded 2 machine(s) into MachineInformation_MVP.");
+                Logger.WriteDebugLog($"SeedMachines: seeded {numberOfMachines} machine(s) into MachineInformation_MVP.");
             }
             catch (Exception ex)
             {
@@ -114,16 +124,17 @@ public static class DatabaseRepository
     public static List<ProgramDetails> GetHardcodedPrograms()
     {
         var programs = new List<ProgramDetails>();
-        int numPrograms = Rand.Next(1, 5);
+        int numPrograms = Rand.Next(2, 5);
         for (int i = 0; i < numPrograms; i++)
         {
-            int stdCycleTime = Rand.Next(30, 300);
+            int stdCycleTime = 7; // 7 seconds (6s machining + spinup/down)
+            int stdLoadUnload = 2; // 2 seconds load/unload
             programs.Add(new ProgramDetails
             {
                 ProgramNumber = Rand.Next(500, 1000),
                 StdCycleTime = stdCycleTime,
-                StdLoadUnload = Rand.Next(5, Math.Max(6, stdCycleTime / 10)),
-                Target = 28800 / stdCycleTime,
+                StdLoadUnload = stdLoadUnload,
+                Target = 28800 / (stdCycleTime + stdLoadUnload), // ~2880 parts / shift
                 OperatorId = Rand.Next(60, 350)
             });
         }
@@ -169,6 +180,43 @@ public static class DatabaseRepository
             new AlarmInfo { AlarmNo = 501, AlarmDesc = "Memory overflow" }
         };
     }
+    public static List<ProcessParameterDef> GetHardcodedProcessParameters()
+    {
+        return new List<ProcessParameterDef>
+        {
+            new ProcessParameterDef { Id = 1, ParameterName = "SpindleLoad", DisplayText = "Spindle Load", Unit = "%", LowerValue = 0, HigherValue = 140, Category = "Spindle", Axes = null },
+            new ProcessParameterDef { Id = 2, ParameterName = "SpindleSpeed", DisplayText = "Spindle Speed", Unit = "rpm", LowerValue = 0, HigherValue = 8000, Category = "Spindle", Axes = null },
+            new ProcessParameterDef { Id = 3, ParameterName = "SpindleTemp", DisplayText = "Spindle Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Spindle", Axes = null },
+
+            new ProcessParameterDef { Id = 4, ParameterName = "X-ServoLoad", DisplayText = "X Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "X" },
+            new ProcessParameterDef { Id = 5, ParameterName = "X-ServoSpeed", DisplayText = "X Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "X" },
+            new ProcessParameterDef { Id = 6, ParameterName = "X-ServoTemp", DisplayText = "X Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "X" },
+
+            new ProcessParameterDef { Id = 7, ParameterName = "Z-ServoLoad", DisplayText = "Z Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "Z" },
+            new ProcessParameterDef { Id = 8, ParameterName = "Z-ServoSpeed", DisplayText = "Z Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "Z" },
+            new ProcessParameterDef { Id = 9, ParameterName = "Z-ServoTemp", DisplayText = "Z Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "Z" },
+
+            new ProcessParameterDef { Id = 10, ParameterName = "A-ServoLoad", DisplayText = "A Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "A" },
+            new ProcessParameterDef { Id = 11, ParameterName = "A-ServoSpeed", DisplayText = "A Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "A" },
+            new ProcessParameterDef { Id = 12, ParameterName = "A-ServoTemp", DisplayText = "A Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "A" },
+
+            new ProcessParameterDef { Id = 13, ParameterName = "Y-ServoLoad", DisplayText = "Y Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "Y" },
+            new ProcessParameterDef { Id = 14, ParameterName = "Y-ServoSpeed", DisplayText = "Y Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "Y" },
+            new ProcessParameterDef { Id = 15, ParameterName = "Y-ServoTemp", DisplayText = "Y Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "Y" },
+
+            new ProcessParameterDef { Id = 16, ParameterName = "B-ServoLoad", DisplayText = "B Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "B" },
+            new ProcessParameterDef { Id = 17, ParameterName = "B-ServoSpeed", DisplayText = "B Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "B" },
+            new ProcessParameterDef { Id = 18, ParameterName = "B-ServoTemp", DisplayText = "B Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "B" },
+
+            new ProcessParameterDef { Id = 19, ParameterName = "C-ServoLoad", DisplayText = "C Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "C" },
+            new ProcessParameterDef { Id = 20, ParameterName = "C-ServoSpeed", DisplayText = "C Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "C" },
+            new ProcessParameterDef { Id = 21, ParameterName = "C-ServoTemp", DisplayText = "C Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "C" },
+
+            new ProcessParameterDef { Id = 22, ParameterName = "U-ServoLoad", DisplayText = "U Servo Load", Unit = "%", LowerValue = 0, HigherValue = 110, Category = "Axis", Axes = "U" },
+            new ProcessParameterDef { Id = 23, ParameterName = "U-ServoSpeed", DisplayText = "U Servo Speed", Unit = "rpm", LowerValue = 0, HigherValue = 3000, Category = "Axis", Axes = "U" },
+            new ProcessParameterDef { Id = 24, ParameterName = "U-ServoTemp", DisplayText = "U Servo Temperature", Unit = "°C", LowerValue = 4, HigherValue = 90, Category = "Axis", Axes = "U" }
+        };
+    }
     #endregion
     #region Batch Inserts (MVP SQLite)
     // 1. MachineRunningStatus_MVP
@@ -207,7 +255,7 @@ public static class DatabaseRepository
                     pOpID.Value = r.OperatorID ?? (object)DBNull.Value;
                     pTarget.Value = r.Target;
                     pUpdatedTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -253,7 +301,7 @@ public static class DatabaseRepository
                     pAlarmDesc.Value = r.AlarmDesc ?? (object)DBNull.Value;
                     pAlarmTS.Value = r.AlarmTS ?? (object)DBNull.Value;
                     pUpdatedTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -305,7 +353,7 @@ public static class DatabaseRepository
                     pDth.Value = r.DownThreshold;
                     pSCT.Value = r.StdCycleTime;
                     pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -355,7 +403,7 @@ public static class DatabaseRepository
                     pDth.Value = r.DownThreshold;
                     pDID.Value = r.DownID;
                     pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -411,7 +459,7 @@ public static class DatabaseRepository
                     pCO2.Value = 0;
                     pTotal.Value = r.TotalEnergy;
                     pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -473,7 +521,7 @@ public static class DatabaseRepository
                     pCT.Value = r.CT;
                     pOpID.Value = r.OperatorID ?? (object)DBNull.Value;
                     pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -533,7 +581,7 @@ public static class DatabaseRepository
                     pSCT.Value = r.StdCycleTime;
                     pSLU.Value = r.StdLoadUnload;
                     pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
-                    pSynced.Value = 0;
+                    pSynced.Value = Rand.Next(0, 2);
                     await command.ExecuteNonQueryAsync();
                 }
                 await transaction.CommitAsync();
@@ -549,6 +597,52 @@ public static class DatabaseRepository
         catch (Exception ex)
         {
             Logger.WriteErrorLog($"BatchInsertMvpMachineProgramProduction error: {ex.Message}");
+        }
+    }
+    // 8. MachineWiseParameterDetails_MVP
+    public static async Task BatchInsertMvpMachineParameter(List<MvpMachineParameter> records)
+    {
+        if (records == null || records.Count == 0) return;
+        try
+        {
+            using var conn = await SqliteConnectionManager.GetConnectionAsync();
+            using var transaction = conn.BeginTransaction();
+            try
+            {
+                var command = conn.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = @"
+                    INSERT INTO MachineWiseParameterDetails_MVP (IOTID, ParameterID, ParameterValue, UpdatedTS, SyncedStatus)
+                    VALUES ($iotid, $pid, $pval, $uts, $synced)";
+
+                var pIOTID = command.CreateParameter(); pIOTID.ParameterName = "$iotid"; command.Parameters.Add(pIOTID);
+                var pPID = command.CreateParameter(); pPID.ParameterName = "$pid"; command.Parameters.Add(pPID);
+                var pPVal = command.CreateParameter(); pPVal.ParameterName = "$pval"; command.Parameters.Add(pPVal);
+                var pUTS = command.CreateParameter(); pUTS.ParameterName = "$uts"; command.Parameters.Add(pUTS);
+                var pSynced = command.CreateParameter(); pSynced.ParameterName = "$synced"; command.Parameters.Add(pSynced);
+
+                foreach (var r in records)
+                {
+                    pIOTID.Value = r.IOTID;
+                    pPID.Value = r.ParameterID ?? (object)DBNull.Value;
+                    pPVal.Value = r.ParameterValue ?? (object)DBNull.Value;
+                    pUTS.Value = r.UpdatedTS ?? (object)DBNull.Value;
+                    pSynced.Value = Rand.Next(0, 2);
+                    await command.ExecuteNonQueryAsync();
+                }
+                await transaction.CommitAsync();
+                Logger.WriteDebugLog($"Batch inserted {records.Count} parameter records into MachineWiseParameterDetails_MVP");
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                Logger.WriteErrorLog($"BatchInsertMvpMachineParameter transaction error: {ex.Message}");
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.WriteErrorLog($"BatchInsertMvpMachineParameter error: {ex.Message}");
         }
     }
     #endregion
